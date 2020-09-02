@@ -1,37 +1,94 @@
 import tensorflow as tf
 
-from tensorflow.keras.layers import MaxPool2D
+from tensorflow.keras.layers import ReLU
+from tensorflow.keras.layers import BatchNormalization
+from tensorflow_addons.layers import InstanceNormalization
+from tensorflow import nn
+from .conv_blocks import conv_block
+from .conv_blocks import res_block
+from .norm import InstanceNorm
 
-from .cnn_blocks import conv_block
-from .cnn_blocks import conv_block_x2
-from .cnn_blocks import conv_block_x3
-from .cnn_blocks import conv_transpose_block
-from .cnn_blocks import conv_transpose_block_x2
-from .cnn_blocks import conv_transpose_block_x3
+def _preparation_layer(inputs, filters):
+    norm = InstanceNorm
+    #norm = BatchNormalization
+    activation = ReLU
+
+    # norm_kwargs = {
+    #     'center': False,
+    #     'scale': False}
+
+    outputs = conv_block(
+        inputs, filters, kernel_size=9, padding=4, \
+            norm=norm, activation=activation, norm_kwargs={})
+
+    return outputs
 
 
-def content_encoder_v1(inputs, normalization, dropout, activation, \
-    reg_coef, skip, **kwargs):
+def _downsample_layer(inputs, filters):
+    norm = InstanceNorm
+    #norm = BatchNormalization
+    activation = ReLU
 
-    conv_x2 = lambda inputs, filters: conv_block_x2(
-        inputs, filters, normalization=normalization, dropout=dropout, \
-        activation=activation, reg_coef=reg_coef, skip=skip, **kwargs)
+    norm_kwargs = {
+        'center': False,
+        'scale': False}
 
-    conv_x3 = lambda inputs, filters: conv_block_x3(
-        inputs, filters, normalization=normalization, dropout=dropout, \
-        activation=activation, reg_coef=reg_coef, skip=skip, **kwargs)
+    outputs = conv_block(inputs, filters, kernel_size=6, \
+        padding=2, stride=2, norm=norm, activation=activation, \
+        norm_kwargs={})
 
-    outputs_b1 = conv_x2(inputs, filters=64)
-    outputs = MaxPool2D()(outputs_b1)
+    return outputs
 
-    outputs_b2 = conv_x2(outputs, filters=128)
-    outputs = MaxPool2D()(outputs_b2)
 
-    outputs_b3 = conv_x3(outputs, filters=256)
-    outputs = MaxPool2D()(outputs_b3)
+def _residual_layer(inputs, filters):
+    norm = InstanceNorm
+    #norm = BatchNormalization
+    activation = ReLU
 
-    outputs = conv_x3(outputs, filters=512)
-    outputs = MaxPool2D()(outputs)
+    # norm_kwargs = {
+    #     'center': False,
+    #     'scale': False}
 
-    return outputs_b1, outputs_b2, outputs_b3, outputs
+    outputs = res_block(
+        inputs, filters, norm=norm, activation=activation, \
+        norm_kwargs={})
 
+    return outputs
+
+
+def content_encoder(
+    inputs, 
+    filters=48,  
+    num_downsamples=2, 
+    num_res_blocks=4, 
+    skip_dim=5):
+
+    outputs = _preparation_layer(inputs, filters)
+    skips = []
+
+    for _ in range(num_downsamples):
+        filters *= 2
+
+        skips.append(outputs[:,:,:, :skip_dim])
+        outputs = _downsample_layer(outputs, filters)
+
+    for _ in range(num_res_blocks):
+        outputs = _residual_layer(outputs, filters)
+
+    skips.reverse()
+
+    return outputs, skips
+
+
+def ContentEncoder(input_shape=(1024, 1024, 3)):
+    inputs = tf.keras.Input(input_shape)
+    #outputs, skips = content_encoder(inputs)
+    outputs = content_encoder(inputs)
+
+    #model = tf.keras.Model(inputs=inputs, outputs=[outputs, *skips])
+    model = tf.keras.Model(inputs=inputs, outputs=outputs)
+
+    return model
+
+
+ceModel = ContentEncoder()

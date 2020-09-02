@@ -6,9 +6,6 @@ __pycache__/
 # code editor
 .vscode
 
-# jupyter
-*.ipynb 
-
 # C extensions
 *.so
 
